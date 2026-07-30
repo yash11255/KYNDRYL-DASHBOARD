@@ -59,7 +59,8 @@ self.addEventListener('fetch', (e) => {
       caches.match(request).then(cached => {
         if (cached) return cached;
         return fetch(request).then(resp => {
-          if (resp.ok) caches.open(CACHE).then(c => c.put(request, resp.clone()));
+          const clone = resp.clone();
+          if (resp.ok) caches.open(CACHE).then(c => c.put(request, clone));
           return resp;
         });
       })
@@ -73,7 +74,8 @@ self.addEventListener('fetch', (e) => {
       caches.match(request).then(cached => {
         if (cached) return cached;
         return fetch(request).then(resp => {
-          if (resp.ok) caches.open(CACHE).then(c => c.put(request, resp.clone()));
+          const clone = resp.clone();
+          if (resp.ok) caches.open(CACHE).then(c => c.put(request, clone));
           return resp;
         }).catch(() => new Response('', { status: 503 }));
       })
