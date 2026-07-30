@@ -1,0 +1,14 @@
+{
+  "name": "bharat-cares-pathshala",
+  "version": "1.0.0",
+  "description": "Bharat Cares & Kyndryl AI Pathshala Field Operations Platform",
+  "scripts": {
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install",
+    "dev": "concurrently \"cd server && npm run dev\" \"cd client && npm start\"",
+    "start": "cd server && npm start",
+    "seed": "cd server && node seed.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}
