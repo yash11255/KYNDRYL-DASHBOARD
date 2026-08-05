@@ -62,6 +62,8 @@ const JourneyBar = ({ status, km }) => {
   );
 };
 
+const EMPTY_PLAN = { school: '', date: '', topic: 'AI Pathshala', expectedStudents: '', notes: '' };
+
 export default function TrainerDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -69,6 +71,10 @@ export default function TrainerDashboard() {
   const [sessions,      setSessions]      = useState([]);
   const [journeyState,  setJourneyState]  = useState({});
   const [loading,       setLoading]       = useState(true);
+  const [schools,       setSchools]       = useState([]);
+  const [planModal,     setPlanModal]     = useState(false);
+  const [planForm,      setPlanForm]      = useState(EMPTY_PLAN);
+  const [planSaving,    setPlanSaving]    = useState(false);
 
   useEffect(() => {
     Promise.all([api.get('/sessions/my-assignments'), api.get('/sessions/my-sessions')])
@@ -80,6 +86,23 @@ export default function TrainerDashboard() {
         setJourneyState(jState);
       }).finally(() => setLoading(false));
   }, []);
+
+  const openPlanModal = () => {
+    if (!schools.length) api.get('/sessions/schools').then(({ data }) => setSchools(data));
+    setPlanForm(EMPTY_PLAN);
+    setPlanModal(true);
+  };
+
+  const submitPlan = async e => {
+    e.preventDefault(); setPlanSaving(true);
+    try {
+      const { data } = await api.post('/sessions/my-assignments', planForm);
+      setAssignments(prev => [...prev, data].sort((a, b) => new Date(a.date) - new Date(b.date)));
+      toast.success('Session scheduled');
+      setPlanModal(false);
+    } catch (err) { toast.error(err.response?.data?.message || 'Could not schedule session'); }
+    finally { setPlanSaving(false); }
+  };
 
   const upcoming        = assignments.filter(a => new Date(a.date) >= new Date(new Date().setHours(0, 0, 0, 0)));
   const todayAssignment = upcoming.find(a => fmtDate(a.date).isToday);
@@ -155,7 +178,12 @@ export default function TrainerDashboard() {
             {user?.role === 'reviewer' ? 'Your observation assignments' : 'Your AI Pathshala schedule'}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {user?.role === 'trainer' && (
+            <button className="btn btn-primary btn-sm" onClick={openPlanModal} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <Icon d="M12 5v14M5 12h14" size={13} /> Plan Visit
+            </button>
+          )}
           <button className="btn btn-ghost btn-sm" onClick={() => navigate('/trainer/basestay')} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <Icon d={ICONS.hotel} size={13} /> Base Stay
           </button>
@@ -339,6 +367,53 @@ export default function TrainerDashboard() {
             <path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
           <p>No assignments yet. Your coordinator will assign sessions soon.</p>
+        </div>
+      )}
+
+      {/* ── Plan Visit modal (self-scheduled assignment) ── */}
+      {planModal && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setPlanModal(false)}>
+          <div className="modal">
+            <div className="modal-header">
+              <span className="modal-title">Plan a Visit</span>
+              <button className="modal-close" onClick={() => setPlanModal(false)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <form onSubmit={submitPlan}>
+              <div className="modal-body">
+                <div className="form-group">
+                  <label className="form-label">School *</label>
+                  <select className="form-input" required value={planForm.school} onChange={e => setPlanForm({ ...planForm, school: e.target.value })}>
+                    <option value="">Select school…</option>
+                    {schools.map(s => <option key={s._id} value={s._id}>{s.name} — {s.district}</option>)}
+                  </select>
+                </div>
+                <div className="form-grid-2">
+                  <div className="form-group">
+                    <label className="form-label">Session Date *</label>
+                    <input className="form-input" type="date" required value={planForm.date} onChange={e => setPlanForm({ ...planForm, date: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Expected Students</label>
+                    <input className="form-input" type="number" value={planForm.expectedStudents} onChange={e => setPlanForm({ ...planForm, expectedStudents: e.target.value })} placeholder="Approx. count" />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Topic</label>
+                  <input className="form-input" value={planForm.topic} onChange={e => setPlanForm({ ...planForm, topic: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Notes</label>
+                  <textarea className="form-input" value={planForm.notes} onChange={e => setPlanForm({ ...planForm, notes: e.target.value })} placeholder="Anything your coordinator should know…" />
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPlanModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary btn-sm" disabled={planSaving}>{planSaving ? 'Saving…' : 'Schedule Session'}</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

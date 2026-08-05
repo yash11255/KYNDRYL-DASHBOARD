@@ -4,6 +4,7 @@ const Assignment = require('../models/Assignment');
 const SessionReview = require('../models/SessionReview');
 const AuditLog = require('../models/AuditLog');
 const User = require('../models/User');
+const School = require('../models/School');
 const { auth } = require('../middleware/auth');
 const { createDriveFolder, uploadFileToDrive, provisionTrainerDriveFolders, appendToSheet, ensureSheetHeaders, getOrCreateTrainerSheet, appendToTrainerSheet, driveConfigured } = require('../config/googleApis');
 const fs = require('fs');
@@ -321,6 +322,41 @@ router.get('/my-assignments', async (req, res) => {
       .populate('school', 'name district block address googleMapsLink latitude longitude principalName principalPhone spokeContactName spokeContactPhone spokeWhatsAppLink')
       .sort({ date: 1 });
     res.json(assignments);
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+/* ── Schools list (for trainer self-scheduling picker) ── */
+router.get('/schools', async (req, res) => {
+  try {
+    const schools = await School.find({ active: true }).sort({ name: 1 });
+    res.json(schools);
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+/* ── Trainer: self-schedule their own assignment (itinerary) ──
+   Admins/managers/team leads already have full create access via
+   POST /api/admin/assignments. This lets a trainer do the same for
+   themselves, without being able to assign other trainers. ── */
+router.post('/my-assignments', async (req, res) => {
+  try {
+    if (req.user.role !== 'trainer')
+      return res.status(403).json({ message: 'Only trainers can self-schedule assignments' });
+
+    const { school, date, topic, expectedStudents, notes } = req.body;
+    if (!school || !date)
+      return res.status(400).json({ message: 'School and date are required' });
+
+    const assignment = await (new Assignment({
+      trainer: req.user._id,
+      school, date, topic, expectedStudents: expectedStudents || undefined, notes,
+    })).save();
+
+    await assignment.populate([
+      { path: 'trainer', select: 'name phone district' },
+      { path: 'school', select: 'name district block address googleMapsLink latitude longitude principalName principalPhone spokeContactName spokeContactPhone spokeWhatsAppLink' },
+    ]);
+
+    res.status(201).json(assignment);
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
