@@ -8,8 +8,25 @@ const app = express();
 
 connectDB();
 
+// Allowed origins — hardcoded so this doesn't break on every new Vercel
+// preview URL. Vercel gives each deployment its own unique subdomain
+// (e.g. kyndryl-dashboard-<hash>-<team>.vercel.app), so we match the
+// whole *.vercel.app domain rather than a single fixed string.
+const ALLOWED_ORIGINS = [
+  'http://localhost:3000',
+  'https://kyndryl-dashboard.vercel.app',
+  process.env.CLIENT_URL,
+].filter(Boolean);
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true); // server-to-server / curl / same-origin
+    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    try {
+      if (new URL(origin).hostname.endsWith('.vercel.app')) return callback(null, true);
+    } catch { /* ignore invalid origin header */ }
+    return callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
