@@ -12,8 +12,15 @@ connectDB();
 // preview URL. Vercel gives each deployment its own unique subdomain
 // (e.g. kyndryl-dashboard-<hash>-<team>.vercel.app), so we match the
 // whole *.vercel.app domain rather than a single fixed string.
+//
+// Also allow localhost:5001 (the backend's own port): CRA's local dev
+// proxy rewrites the Origin header to match its target before forwarding,
+// so requests coming through `npm start`'s proxy arrive here looking
+// like they came from the backend itself. Harmless in dev, never hit
+// in production where the frontend calls the API's absolute URL directly.
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
+  'http://localhost:5001',
   'https://kyndryl-dashboard.vercel.app',
   process.env.CLIENT_URL,
 ].filter(Boolean);
