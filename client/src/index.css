@@ -573,6 +573,17 @@ table {
   font-size: 13px;
 }
 
+/* thead th used to be `position: sticky; top: var(--topbar-h)`, intended
+   to pin the header below the fixed navbar while the page scrolls. But
+   overflow-x: auto on .table-wrap forces its overflow-y to compute as
+   auto too (browsers won't let one axis be visible and the other not),
+   which makes .table-wrap — not the page — the sticky positioning
+   ancestor. The header then sits `--topbar-h` down *inside that tiny
+   wrapper*, overlapping the row(s) right beneath it — hiding them
+   completely when there are only one or two rows. Since .table-wrap
+   never actually scrolls vertically (it has no height cap), a header
+   sticky to it doesn't pin against real page scroll anyway, so there
+   was no working behavior being traded away here — just static flow. */
 thead th {
   padding: 10px 16px;
   text-align: left;
@@ -584,8 +595,6 @@ thead th {
   background: var(--c-10);
   border-bottom: 1px solid var(--c-20);
   white-space: nowrap;
-  position: sticky;
-  top: var(--topbar-h);
 }
 
 tbody td {
