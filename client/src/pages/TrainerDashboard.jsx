@@ -119,6 +119,11 @@ export default function TrainerDashboard() {
       const pos = await getCurrentPosition();
       const { data } = await api.get(`/sessions/for-assignment/${assignment._id}`);
       const sessionId = data.session._id;
+      // getSession() only looks inside `sessions`, which was fetched once on
+      // mount and may not yet include today's session (e.g. this is the
+      // trainer's first action of the day). Without this, journeyState below
+      // updates correctly but the UI can't see it until a full page reload.
+      setSessions(prev => prev.some(s => s._id === sessionId) ? prev : [...prev, data.session]);
       await api.put(`/sessions/${sessionId}/journey/start`, {
         latitude: pos.latitude, longitude: pos.longitude,
         locationName: `${pos.latitude.toFixed(5)}, ${pos.longitude.toFixed(5)}`,
@@ -139,6 +144,7 @@ export default function TrainerDashboard() {
       const pos = await getCurrentPosition();
       const { data } = await api.get(`/sessions/for-assignment/${assignment._id}`);
       const sessionId = data.session._id;
+      setSessions(prev => prev.some(s => s._id === sessionId) ? prev : [...prev, data.session]);
       const result = await api.put(`/sessions/${sessionId}/journey/arrive`, {
         latitude: pos.latitude, longitude: pos.longitude,
         locationName: `${pos.latitude.toFixed(5)}, ${pos.longitude.toFixed(5)}`,
