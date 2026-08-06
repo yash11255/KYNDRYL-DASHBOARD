@@ -6,7 +6,7 @@ const AuditLog = require('../models/AuditLog');
 const User = require('../models/User');
 const School = require('../models/School');
 const { auth } = require('../middleware/auth');
-const { createDriveFolder, uploadFileToDrive, provisionTrainerDriveFolders, appendToSheet, ensureSheetHeaders, getOrCreateTrainerSheet, appendToTrainerSheet, driveConfigured } = require('../config/googleApis');
+const { createDriveFolder, uploadFileToDrive, provisionTrainerDriveFolders, appendToSheet, ensureSheetHeaders, getOrCreateTrainerSheet, appendToTrainerSheet, driveConfigured, isConfigured } = require('../config/googleApis');
 const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
@@ -793,7 +793,7 @@ router.post('/sync-to-sheets', async (req, res) => {
     if (!ADMIN_ROLES.includes(req.user.role))
       return res.status(403).json({ message: 'Admins only' });
 
-    if (!googleConfigured)
+    if (!isConfigured)
       return res.status(503).json({ message: 'Google APIs not configured' });
 
     const sessions = await Session.find({ status: 'submitted' })
