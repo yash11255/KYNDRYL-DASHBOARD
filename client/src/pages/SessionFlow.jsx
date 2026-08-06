@@ -713,14 +713,10 @@ export default function SessionFlow() {
                 <div style={{ borderTop: '1px dashed var(--border)', paddingTop: 14, marginBottom: 14 }}>
                   <div style={LBL}>Fuel Bills Today</div>
                   <input className="form-input" type="number" placeholder="₹ 0 (leave blank if none)" value={travel.fuelAmount} onChange={e => setTravel(t => ({ ...t, fuelAmount: e.target.value }))} style={{ marginBottom: 10 }} />
-                  {travel.fuelAmount > 0 && (
-                    <>
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>Attach fuel bill photo + payment proof:</div>
-                      <SimpleCamera label="Fuel Bill Photo" multiple={true}
-                        onCapture={photos => setTravel(t => ({ ...t, fuelBills: [...t.fuelBills, ...(Array.isArray(photos) ? photos : [photos])] }))} />
-                      {travel.fuelBills.length > 0 && <div style={{ marginTop: 10 }}><PhotoGrid photos={travel.fuelBills} /></div>}
-                    </>
-                  )}
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>Attach fuel bill photo + payment proof:</div>
+                  <SimpleCamera label="Fuel Bill Photo" multiple={true}
+                    onCapture={photos => setTravel(t => ({ ...t, fuelBills: [...t.fuelBills, ...(Array.isArray(photos) ? photos : [photos])] }))} />
+                  {travel.fuelBills.length > 0 && <div style={{ marginTop: 10 }}><PhotoGrid photos={travel.fuelBills} /></div>}
                 </div>
 
                 <div>
