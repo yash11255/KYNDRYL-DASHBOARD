@@ -6,7 +6,7 @@ const AuditLog = require('../models/AuditLog');
 const User = require('../models/User');
 const School = require('../models/School');
 const { auth } = require('../middleware/auth');
-const { createDriveFolder, uploadFileToDrive, provisionTrainerDriveFolders, appendToSheet, ensureSheetHeaders, getOrCreateTrainerSheet, appendToTrainerSheet, driveConfigured, isConfigured } = require('../config/googleApis');
+const { createDriveFolder, findOrCreateFolder, uploadFileToDrive, appendToSheet, ensureSheetHeaders, getOrCreateTrainerSheet, appendToTrainerSheet, driveConfigured, isConfigured } = require('../config/googleApis');
 const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
@@ -29,50 +29,39 @@ async function uploadLocalFile(filename, destName, mimeType, folderId) {
   }
 }
 
-/* ── Ensure trainer has all 3 Drive subfolders; provisions if missing ── */
-async function ensureTrainerFolders(trainer) {
+/* ── Ensure the trainer's root Drive folder exists; provisions if missing ── */
+async function ensureTrainerRoot(trainer) {
   if (!driveConfigured()) return null;
-  // If all 3 subfolders already exist, return them
-  if (trainer.driveAlFolderId && trainer.driveBaFolderId && trainer.drivePhotosFolderId) {
-    return {
-      rootId:   trainer.driveFolderId,
-      alId:     trainer.driveAlFolderId,
-      baId:     trainer.driveBaFolderId,
-      photosId: trainer.drivePhotosFolderId,
-    };
-  }
-  // Provision all folders
+  if (trainer.driveFolderId) return { rootId: trainer.driveFolderId, rootUrl: trainer.driveFolderUrl };
   try {
-    const folders = await provisionTrainerDriveFolders(trainer.name, process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID);
-    if (folders?.rootId) {
-      await User.findByIdAndUpdate(trainer._id, {
-        driveFolderId:       folders.rootId,
-        driveFolderUrl:      folders.rootUrl,
-        driveAlFolderId:     folders.alId,
-        driveBaFolderId:     folders.baId,
-        drivePhotosFolderId: folders.photosId,
-      });
-      Object.assign(trainer, {
-        driveFolderId:       folders.rootId,
-        driveFolderUrl:      folders.rootUrl,
-        driveAlFolderId:     folders.alId,
-        driveBaFolderId:     folders.baId,
-        drivePhotosFolderId: folders.photosId,
-      });
-    }
-    return folders;
-  } catch (e) { console.log('Trainer folder provision failed:', e.message); return null; }
+    const root = await createDriveFolder(trainer.name, process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID);
+    if (!root?.id) return null;
+    await User.findByIdAndUpdate(trainer._id, { driveFolderId: root.id, driveFolderUrl: root.webViewLink });
+    Object.assign(trainer, { driveFolderId: root.id, driveFolderUrl: root.webViewLink });
+    return { rootId: root.id, rootUrl: root.webViewLink };
+  } catch (e) { console.log('Trainer root folder provision failed:', e.message); return null; }
 }
 
-/* ── Get or create the per-school photos subfolder inside trainer's Photos/ ── */
-async function ensureSchoolPhotoFolder(trainer, school, date) {
-  const folders = await ensureTrainerFolders(trainer);
-  if (!folders?.photosId) return null;
-  const sName = sanitise(school.name || 'School');
-  const dStr  = dateFmt(date);
+/* ── Ensure Trainer/School/{Acknowledgment Letter, Baseline Assessment, Photographs}.
+   One folder per school (reused across every visit, not per-date) — matches the
+   structure trainers and admins browse by hand in Drive. ── */
+async function ensureSchoolFolders(trainer, school) {
+  const root = await ensureTrainerRoot(trainer);
+  if (!root?.rootId) return null;
   try {
-    return await createDriveFolder(`${sName}_${dStr}`, folders.photosId);
-  } catch (e) { console.log('School photo folder creation failed:', e.message); return null; }
+    const schoolFolder = await findOrCreateFolder(school.name || 'School', root.rootId);
+    if (!schoolFolder?.id) return null;
+    const [al, ba, photos] = await Promise.all([
+      findOrCreateFolder('Acknowledgment Letter', schoolFolder.id),
+      findOrCreateFolder('Baseline Assessment',   schoolFolder.id),
+      findOrCreateFolder('Photographs',           schoolFolder.id),
+    ]);
+    return {
+      rootId: root.rootId, rootUrl: root.rootUrl,
+      schoolFolderId: schoolFolder.id, schoolFolderUrl: schoolFolder.webViewLink,
+      alId: al?.id, baId: ba?.id, photosId: photos?.id,
+    };
+  } catch (e) { console.log('School folder provision failed:', e.message); return null; }
 }
 
 /* ── Build Sheets HYPERLINK formula or plain value ── */
@@ -504,14 +493,14 @@ router.put('/:id/checkin', async (req, res) => {
 
     let checkInPhoto = photoUrl ? { url: photoUrl, filename: photoFilename, latitude, longitude, capturedAt: new Date(), tag: 'checkin' } : undefined;
 
-    // Upload check-in photo to Drive → Photos/SchoolName_Date/
+    // Upload check-in photo to Drive → Trainer/School/Photographs/
     if (checkInPhoto?.filename) {
       try {
-        const photoFolder = await ensureSchoolPhotoFolder(session.trainer, session.school, session.date);
-        if (photoFolder?.id) {
+        const folders = await ensureSchoolFolders(session.trainer, session.school);
+        if (folders?.photosId) {
           const tName = sanitise(session.trainer.name);
           const dStr  = dateFmt(session.date);
-          const up = await uploadLocalFile(photoFilename, `CheckIn_${tName}_${dStr}.jpg`, 'image/jpeg', photoFolder.id);
+          const up = await uploadLocalFile(photoFilename, `CheckIn_${tName}_${dStr}.jpg`, 'image/jpeg', folders.photosId);
           if (up?.webViewLink) { checkInPhoto.driveUrl = up.webViewLink; checkInPhoto.url = up.webViewLink; }
         }
       } catch (e) { console.log('CheckIn Drive upload skipped:', e.message); }
@@ -535,10 +524,10 @@ router.put('/:id/photos', async (req, res) => {
 
     const newPhotos = photos.map(p => ({ ...p, tag: 'session', capturedAt: new Date() }));
 
-    // Upload session photos to Drive → Photos/SchoolName_Date/
+    // Upload session photos to Drive → Trainer/School/Photographs/
     try {
-      const photoFolder = await ensureSchoolPhotoFolder(session.trainer, session.school, session.date);
-      if (photoFolder?.id) {
+      const folders = await ensureSchoolFolders(session.trainer, session.school);
+      if (folders?.photosId) {
         const tName    = sanitise(session.trainer.name);
         const dStr     = dateFmt(session.date);
         const startIdx = session.sessionPhotos.length + 1;
@@ -546,7 +535,7 @@ router.put('/:id/photos', async (req, res) => {
           const p = newPhotos[i];
           if (!p.filename) continue;
           const label = `Session_${String(startIdx + i).padStart(3,'0')}_${tName}_${dStr}.jpg`;
-          const up = await uploadLocalFile(p.filename, label, 'image/jpeg', photoFolder.id);
+          const up = await uploadLocalFile(p.filename, label, 'image/jpeg', folders.photosId);
           if (up?.webViewLink) { newPhotos[i].driveUrl = up.webViewLink; newPhotos[i].url = up.webViewLink; }
         }
       }
@@ -585,12 +574,12 @@ router.put('/:id/assessment', async (req, res) => {
       session.assessment.pdfFilename = filename;
       session.assessment.pdfUrl      = url;
 
-      // Upload BA PDF → trainer's BA/ subfolder
-      const folders = await ensureTrainerFolders(session.trainer);
+      // Upload BA PDF → Trainer/School/Baseline Assessment/
+      const folders = await ensureSchoolFolders(session.trainer, session.school);
       if (folders?.baId) {
         const up = await uploadLocalFile(filename, filename, 'application/pdf', folders.baId);
         if (up?.webViewLink) { session.assessment.driveUrl = up.webViewLink; session.assessment.pdfUrl = up.webViewLink; }
-        console.log(`Drive ✅ BA PDF → BA/: ${filename}`);
+        console.log(`Drive ✅ BA PDF → ${session.school?.name}/Baseline Assessment/: ${filename}`);
       }
     } catch (e) { console.log('Assessment PDF/Drive skipped:', e.message); }
 
@@ -626,22 +615,19 @@ router.put('/:id/acknowledgment', async (req, res) => {
         });
         pdfUrl = `/uploads/${pdfFilename}`;
 
-        // Upload AL PDF → trainer's AL/ subfolder; photo → Photos/
-        const folders = await ensureTrainerFolders(session.trainer);
+        // Upload AL PDF → Trainer/School/Acknowledgment Letter/; photo → Trainer/School/Photographs/
+        const folders = await ensureSchoolFolders(session.trainer, session.school);
         if (folders?.alId) {
-          // Branded PDF → AL/
+          // Branded PDF → Acknowledgment Letter/
           const upPdf = await uploadLocalFile(pdfFilename, pdfFilename, 'application/pdf', folders.alId);
           if (upPdf?.webViewLink) { pdfDriveUrl = upPdf.webViewLink; }
 
-          // Original photo → Photos/SchoolName_Date/
+          // Original photo → Photographs/
           if (folders.photosId) {
-            const photoFolder = await ensureSchoolPhotoFolder(session.trainer, session.school, session.date);
-            if (photoFolder?.id) {
-              const upPhoto = await uploadLocalFile(photoFilename, `AL_Photo_${tName}_${dStr}.jpg`, 'image/jpeg', photoFolder.id);
-              if (upPhoto?.webViewLink) { photoObj.driveUrl = upPhoto.webViewLink; photoObj.url = upPhoto.webViewLink; }
-            }
+            const upPhoto = await uploadLocalFile(photoFilename, `AL_Photo_${tName}_${dStr}.jpg`, 'image/jpeg', folders.photosId);
+            if (upPhoto?.webViewLink) { photoObj.driveUrl = upPhoto.webViewLink; photoObj.url = upPhoto.webViewLink; }
           }
-          console.log(`Drive ✅ AL PDF → AL/: ${pdfFilename}`);
+          console.log(`Drive ✅ AL PDF → ${session.school?.name}/Acknowledgment Letter/: ${pdfFilename}`);
         }
       } catch (e) { console.log('AL PDF/Drive skipped:', e.message); }
     }
@@ -702,19 +688,19 @@ router.post('/:id/submit', async (req, res) => {
 
     /* ── Drive: catch-up upload for any files not yet on Drive ── */
     try {
-      const folders = await ensureTrainerFolders(session.trainer);
+      const folders = await ensureSchoolFolders(session.trainer, session.school);
       if (folders) {
-        // AL PDF → AL/
+        // AL PDF → Acknowledgment Letter/
         if (session.acknowledgment?.pdfFilename && !session.acknowledgment.pdfDriveUrl && folders.alId) {
           const up = await uploadLocalFile(session.acknowledgment.pdfFilename, session.acknowledgment.pdfFilename, 'application/pdf', folders.alId);
           if (up?.webViewLink) session.acknowledgment.pdfDriveUrl = up.webViewLink;
         }
-        // BA PDF → BA/
+        // BA PDF → Baseline Assessment/
         if (session.assessment?.pdfFilename && !session.assessment.driveUrl && folders.baId) {
           const up = await uploadLocalFile(session.assessment.pdfFilename, session.assessment.pdfFilename, 'application/pdf', folders.baId);
           if (up?.webViewLink) { session.assessment.driveUrl = up.webViewLink; session.assessment.pdfUrl = up.webViewLink; }
         }
-        // Photos → Photos/SchoolName_Date/
+        // Photos → Photographs/
         const needsPhotos = [
           ...(session.checkIn?.photo?.filename && !session.checkIn.photo.driveUrl
             ? [{ obj: session.checkIn.photo, label: `CheckIn_${tName}_${dStr}.jpg` }] : []),
@@ -723,16 +709,13 @@ router.post('/:id/submit', async (req, res) => {
             .map((p, i) => ({ obj: p, label: `Session_${String(i+1).padStart(3,'0')}_${tName}_${dStr}.jpg` })),
         ];
         if (needsPhotos.length && folders.photosId) {
-          const photoFolder = await ensureSchoolPhotoFolder(session.trainer, session.school, session.date);
-          if (photoFolder?.id) {
-            for (const { obj, label } of needsPhotos) {
-              const up = await uploadLocalFile(obj.filename, label, 'image/jpeg', photoFolder.id);
-              if (up?.webViewLink) { obj.driveUrl = up.webViewLink; obj.url = up.webViewLink; }
-            }
+          for (const { obj, label } of needsPhotos) {
+            const up = await uploadLocalFile(obj.filename, label, 'image/jpeg', folders.photosId);
+            if (up?.webViewLink) { obj.driveUrl = up.webViewLink; obj.url = up.webViewLink; }
           }
         }
-        // Save Drive folder URL (trainer root)
-        session.driveFolderUrl = folders.rootUrl || session.driveFolderUrl;
+        // Save Drive folder URLs (trainer root + this school's folder)
+        session.driveFolderUrl = folders.schoolFolderUrl || folders.rootUrl || session.driveFolderUrl;
         console.log(`Drive ✅ Submit sync: ${session.trainer.name} → ${session.school.name}`);
       }
     } catch (e) { console.log('Drive catch-up skipped:', e.message); }

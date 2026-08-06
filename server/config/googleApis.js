@@ -95,6 +95,19 @@ const createDriveFolder = async (name, parentId) => {
   return res.data;
 };
 
+/* Find a folder by exact name inside a parent; create it if it doesn't exist yet.
+   Used to build the Trainer/School/{Acknowledgment Letter, Baseline Assessment,
+   Photographs} tree without ever creating duplicate school folders. */
+const findOrCreateFolder = async (name, parentId) => {
+  const drive = getDrive();
+  if (!drive || !parentId) return null;
+  const safeName = name.replace(/'/g, "\\'");
+  const q = `name='${safeName}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`;
+  const existing = await drive.files.list({ q, fields: 'files(id,name,webViewLink)' });
+  if (existing.data.files?.length) return existing.data.files[0];
+  return createDriveFolder(name, parentId);
+};
+
 const uploadFileToDrive = async (fileBuffer, fileName, mimeType, folderId) => {
   const drive = getDrive();
   if (!drive) return null;
@@ -202,28 +215,6 @@ const appendToTrainerSheet = async (trainerName, rowData) => {
   });
 };
 
-/* ─────────────────────────────────────────────────────────────
-   Provision all 3 subfolders for a trainer (AL, BA, Photos)
-   Returns { alId, baId, photosId }
-   ───────────────────────────────────────────────────────────── */
-const provisionTrainerDriveFolders = async (trainerName, parentFolderId) => {
-  if (!driveConfigured()) return null;
-  const root = await createDriveFolder(trainerName, parentFolderId || process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID);
-  if (!root?.id) return null;
-  const [al, ba, photos] = await Promise.all([
-    createDriveFolder('Acknowledgment Letters', root.id),
-    createDriveFolder('Baseline Assessments',   root.id),
-    createDriveFolder('Photos',                 root.id),
-  ]);
-  return {
-    rootId:       root.id,
-    rootUrl:      root.webViewLink,
-    alId:         al?.id,
-    baId:         ba?.id,
-    photosId:     photos?.id,
-  };
-};
-
 module.exports = {
   isConfigured,
   driveConfigured,
@@ -234,8 +225,8 @@ module.exports = {
   getDrive,
   getSheets,
   createDriveFolder,
+  findOrCreateFolder,
   uploadFileToDrive,
-  provisionTrainerDriveFolders,
   appendToSheet,
   ensureSheetHeaders,
   getOrCreateTrainerSheet,

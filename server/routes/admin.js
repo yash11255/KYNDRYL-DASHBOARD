@@ -5,7 +5,7 @@ const Assignment = require('../models/Assignment');
 const Session = require('../models/Session');
 const AuditLog = require('../models/AuditLog');
 const { auth } = require('../middleware/auth');
-const { createDriveFolder, provisionTrainerDriveFolders } = require('../config/googleApis');
+const { createDriveFolder, getOrCreateTrainerSheet } = require('../config/googleApis');
 
 // Allow super_admin, manager, team_lead with varying scope
 const managerAccess = (req, res, next) => {
@@ -98,20 +98,28 @@ router.post('/trainers', async (req, res) => {
     const user = new User({ name, email, password, phone, district, employeeId, role: role || 'trainer', managerId, teamLeadId, team });
     await user.save();
 
-    // Auto-create trainer Drive folder with AL, BA, Photos subfolders
-    try {
-      const safeName = (name || 'Trainer').replace(/[^a-zA-Z0-9 ]/g, '').trim();
-      const folders = await provisionTrainerDriveFolders(safeName, process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID);
-      if (folders?.rootId) {
-        user.driveFolderId       = folders.rootId;
-        user.driveFolderUrl      = folders.rootUrl;
-        user.driveAlFolderId     = folders.alId;
-        user.driveBaFolderId     = folders.baId;
-        user.drivePhotosFolderId = folders.photosId;
-        await user.save();
+    // Auto-provision this trainer's Drive root folder + Sheets tab immediately —
+    // school subfolders (Acknowledgment Letter / Baseline Assessment / Photographs)
+    // still get created lazily per-school on their first session, since we don't
+    // know which schools they'll visit yet.
+    if (['trainer', 'reviewer'].includes(user.role)) {
+      try {
+        const safeName = (name || 'Trainer').replace(/[^a-zA-Z0-9 ]/g, '').trim();
+        const folder = await createDriveFolder(safeName, process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID);
+        if (folder?.id) {
+          user.driveFolderId  = folder.id;
+          user.driveFolderUrl = folder.webViewLink;
+          await user.save();
+        }
+      } catch (driveErr) {
+        console.warn('Drive folder creation failed (non-fatal):', driveErr.message);
       }
-    } catch (driveErr) {
-      console.warn('Drive folder creation failed (non-fatal):', driveErr.message);
+
+      try {
+        if (process.env.GOOGLE_SHEETS_ID) await getOrCreateTrainerSheet(process.env.GOOGLE_SHEETS_ID, name);
+      } catch (sheetErr) {
+        console.warn('Sheets tab creation failed (non-fatal):', sheetErr.message);
+      }
     }
 
     res.status(201).json(user.toSafeObject());
