@@ -6,7 +6,7 @@ const AuditLog = require('../models/AuditLog');
 const User = require('../models/User');
 const School = require('../models/School');
 const { auth } = require('../middleware/auth');
-const { createDriveFolder, findOrCreateFolder, uploadFileToDrive, appendToSheet, ensureSheetHeaders, getOrCreateTrainerSheet, appendToTrainerSheet, driveConfigured, isConfigured } = require('../config/googleApis');
+const { createDriveFolder, findOrCreateFolder, uploadFileToDrive, appendToSheet, ensureSheetHeaders, getOrCreateTrainerSheet, appendToTrainerSheet, appendToMasterSheet, driveConfigured, isConfigured } = require('../config/googleApis');
 const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
@@ -757,8 +757,9 @@ router.post('/:id/submit', async (req, res) => {
       ];
 
       await appendToTrainerSheet(session.trainer.name, rowData);
+      await appendToMasterSheet(session.trainer.name, rowData);
       session.sheetsRowUpdated = true;
-      console.log(`Sheets ✅ ${session.trainer.name} row appended`);
+      console.log(`Sheets ✅ ${session.trainer.name} row appended (trainer tab + All Sessions)`);
     } catch (e) { console.log('Sheets sync failed:', e.message); }
 
     session.status = 'submitted';
@@ -827,6 +828,7 @@ router.post('/sync-to-sheets', async (req, res) => {
         ];
 
         await appendToTrainerSheet(session.trainer?.name || 'Trainer', rowData);
+        await appendToMasterSheet(session.trainer?.name || 'Trainer', rowData);
         synced++;
       } catch (e) {
         errors.push(`${session._id}: ${e.message}`);

@@ -215,6 +215,47 @@ const appendToTrainerSheet = async (trainerName, rowData) => {
   });
 };
 
+/* ─────────────────────────────────────────────────────────────
+   MASTER SHEET — one consolidated tab with every trainer's rows,
+   same columns as a trainer tab plus a leading Trainer Name column.
+   ───────────────────────────────────────────────────────────── */
+const MASTER_SHEET_NAME = 'All Sessions';
+const MASTER_SHEET_HEADERS = ['Trainer Name', ...TRAINER_SHEET_HEADERS];
+
+const ensureMasterSheet = async (sheetsId) => {
+  const sheets = getSheets();
+  if (!sheets) return null;
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: sheetsId, fields: 'sheets.properties.title' });
+  const existingTabs = (meta.data.sheets || []).map(s => s.properties.title);
+  if (!existingTabs.includes(MASTER_SHEET_NAME)) {
+    // index: 0 pins it as the first tab, so it's the one people land on
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: sheetsId,
+      requestBody: { requests: [{ addSheet: { properties: { title: MASTER_SHEET_NAME, index: 0 } } }] },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: sheetsId,
+      range: `${MASTER_SHEET_NAME}!A1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [MASTER_SHEET_HEADERS] },
+    });
+  }
+  return MASTER_SHEET_NAME;
+};
+
+const appendToMasterSheet = async (trainerName, rowData) => {
+  const sheets = getSheets();
+  if (!sheets || !process.env.GOOGLE_SHEETS_ID) return null;
+  const tabName = await ensureMasterSheet(process.env.GOOGLE_SHEETS_ID);
+  if (!tabName) return null;
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: process.env.GOOGLE_SHEETS_ID,
+    range: `${tabName}!A:N`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [[trainerName, ...rowData]] },
+  });
+};
+
 module.exports = {
   isConfigured,
   driveConfigured,
@@ -231,4 +272,6 @@ module.exports = {
   ensureSheetHeaders,
   getOrCreateTrainerSheet,
   appendToTrainerSheet,
+  ensureMasterSheet,
+  appendToMasterSheet,
 };
