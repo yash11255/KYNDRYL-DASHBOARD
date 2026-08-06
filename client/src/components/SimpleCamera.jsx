@@ -17,7 +17,7 @@ export default function SimpleCamera({ label = 'Take Photo', onCapture, multiple
     const results = [];
     for (const file of files) {
       const form = new FormData();
-      form.append('photo', file);
+      form.append('file', file);
       try {
         const { data } = await api.post('/upload/photo', form, { headers: { 'Content-Type': 'multipart/form-data' } });
         results.push({ url: data.url, filename: data.filename });

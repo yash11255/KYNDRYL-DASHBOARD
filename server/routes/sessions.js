@@ -17,7 +17,7 @@ const dateFmt  = (d) => new Date(d).toISOString().split('T')[0];
 
 /* ── Upload a local file from /uploads to a Drive folder ── */
 async function uploadLocalFile(filename, destName, mimeType, folderId) {
-  if (!googleConfigured || !folderId || !filename) return null;
+  if (!driveConfigured() || !folderId || !filename) return null;
   const p = path.join(__dirname, '..', 'uploads', filename);
   if (!fs.existsSync(p)) return null;
   try {
